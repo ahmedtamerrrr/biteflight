@@ -1,0 +1,176 @@
+package com.example.biteflight.ui.auth
+
+import android.content.Intent
+import android.os.Bundle
+import android.view.View
+import android.widget.Toast
+import androidx.activity.viewModels
+import androidx.appcompat.app.AppCompatActivity
+import com.example.biteflight.MainActivity
+import com.example.biteflight.R
+import com.example.biteflight.databinding.ActivityLoginBinding
+import com.example.biteflight.ui.seller.SellerDashboardActivity
+import com.example.biteflight.utils.Resource
+import com.google.firebase.Firebase
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.auth
+import com.google.android.material.appbar.MaterialToolbar
+import com.example.biteflight.data.repository.AuthRepository
+
+class LoginActivity : AppCompatActivity() {
+
+    private lateinit var binding: ActivityLoginBinding
+    private lateinit var auth: FirebaseAuth
+
+    private val viewModel: AuthViewModel by viewModels()
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+
+        auth = Firebase.auth
+
+        // Persistent login session check: if already logged in, route immediately
+        if (auth.currentUser != null) {
+            openCorrectPage()
+            return
+        }
+
+        binding = ActivityLoginBinding.inflate(layoutInflater)
+        setContentView(binding.root)
+
+        val toolbar = findViewById<MaterialToolbar>(R.id.topToolbar)
+        setSupportActionBar(toolbar)
+        supportActionBar?.apply {
+            title = "Log In"
+            setDisplayHomeAsUpEnabled(true)
+            setHomeAsUpIndicator(R.drawable.ic_back)
+        }
+
+        setupListeners()
+        observeViewModel()
+    }
+
+    private fun setupListeners() {
+
+        binding.btnLogin.setOnClickListener {
+            performLogin()
+        }
+
+        binding.tvSignUpLink.setOnClickListener {
+
+            startActivity(
+                Intent(
+                    this,
+                    SignUpActivity::class.java
+                )
+            )
+        }
+    }
+
+    override fun onSupportNavigateUp(): Boolean {
+        onBackPressedDispatcher.onBackPressed()
+        return true
+    }
+
+    private fun performLogin() {
+
+        val email = binding.etEmail.text.toString().trim()
+        val password = binding.etPassword.text.toString().trim()
+
+        if (email.isEmpty() || password.isEmpty()) {
+
+            Toast.makeText(
+                this,
+                "Please enter email and password",
+                Toast.LENGTH_SHORT
+            ).show()
+
+            return
+        }
+
+        viewModel.signIn(email, password)
+    }
+
+    private fun observeViewModel() {
+
+        viewModel.signInState.observe(this) { resource ->
+
+            when (resource) {
+
+                is Resource.Loading -> {
+
+                    binding.progressBar.visibility = View.VISIBLE
+                    binding.btnLogin.isEnabled = false
+                }
+
+                is Resource.Success -> {
+
+                    binding.progressBar.visibility = View.GONE
+                    binding.btnLogin.isEnabled = true
+
+                    Toast.makeText(
+                        this,
+                        "Signed in successfully!",
+                        Toast.LENGTH_SHORT
+                    ).show()
+
+                    openCorrectPage()
+                }
+
+                is Resource.Error -> {
+
+                    binding.progressBar.visibility = View.GONE
+                    binding.btnLogin.isEnabled = true
+
+                    Toast.makeText(
+                        this,
+                        resource.message,
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
+        }
+    }
+
+    private fun openCorrectPage() {
+
+        val currentUser = auth.currentUser
+
+        if (currentUser == null) {
+
+            Toast.makeText(
+                this,
+                "No logged-in user found",
+                Toast.LENGTH_SHORT
+            ).show()
+
+            return
+        }
+
+        AuthRepository().fetchUserProfile(currentUser.uid) { result ->
+            when (result) {
+                is Resource.Loading -> Unit
+                is Resource.Success -> {
+                    val destination = when (result.data.role.uppercase()) {
+                        "SELLER" -> SellerDashboardActivity::class.java
+                        "BUYER" -> MainActivity::class.java
+                        else -> null
+                    }
+                    if (destination == null) {
+                        auth.signOut()
+                        Toast.makeText(this, "Please use the rider app for this account", Toast.LENGTH_LONG).show()
+                    } else {
+                        startActivity(Intent(this, destination).apply {
+                            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+                        })
+                        finish()
+                    }
+                }
+                is Resource.Error -> {
+                    auth.signOut()
+                    Toast.makeText(this, result.message, Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+}
